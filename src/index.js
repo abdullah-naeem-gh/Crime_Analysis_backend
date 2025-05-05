@@ -64,6 +64,16 @@ app.get('/api/crime-locations', async (req, res) => {
   res.json(data);
 });
 
+app.get('/api/areas', async (req, res) => {
+  const { data, error } = await supabase.from('areas').select('*');
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json(data);
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
