@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import supabase from '../utils/supabaseClient.js'; // Your Supabase client configuration
+import client, { connectToMongoDB } from '../utils/mongodbClient.js'; // MongoDB client
 
 // Load environment variables
 dotenv.config();
@@ -13,11 +14,15 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Connect to MongoDB
+connectToMongoDB();
+
 // Base route
 app.get('/', (req, res) => {
   res.send('Server is running...');
 });
 
+// Supabase endpoints
 app.get('/api/crimes', async (req, res) => {
   const { data, error } = await supabase.from('crimes').select('*');
   if (error) {
@@ -26,7 +31,6 @@ app.get('/api/crimes', async (req, res) => {
   res.json(data);
 });
 
-// Create endpoints for '/api/criminals' and '/api/victims'
 app.get('/api/criminals', async (req, res) => {
   const { data, error } = await supabase.from('criminals').select('*');
   if (error) {
@@ -43,7 +47,6 @@ app.get('/api/victims', async (req, res) => {
   res.json(data);
 });
 
-// New API endpoint to fetch crime locations with details
 app.get('/api/crime-locations', async (req, res) => {
   const { data, error } = await supabase
     .from('crimes')
@@ -56,22 +59,69 @@ app.get('/api/crime-locations', async (req, res) => {
         longitude
       )
     `);
-
   if (error) {
     return res.status(500).json({ error: error.message });
   }
-
   res.json(data);
 });
 
 app.get('/api/areas', async (req, res) => {
   const { data, error } = await supabase.from('areas').select('*');
-
   if (error) {
     return res.status(500).json({ error: error.message });
   }
-
   res.json(data);
+});
+
+app.post('/api/community-reports', async (req, res) => {
+  try {
+    const { content, location, is_anonymous, user_id } = req.body;
+
+    // Validation
+    if (!content || !user_id) {
+      return res.status(400).json({ error: 'Content and User ID are required' });
+    }
+
+    const database = client.db('yourDatabaseName');
+    const collection = database.collection('community_reports');
+    const report = { content, location, is_anonymous, user_id, date: new Date() };
+    
+    const result = await collection.insertOne(report);
+
+    // Directly return the inserted report
+    res.status(201).json(result);
+  } catch (err) {
+    console.error('Error adding report:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/community-reports/:id', async (req, res) => {
+  try {
+    const database = client.db('database1');
+    const collection = database.collection('community_reports');
+    const result = await collection.deleteOne({ _id: new MongoClient.ObjectId(req.params.id) });
+    if (result.deletedCount === 1) {
+      res.status(204).send(); // Successful deletion, no content
+    } else {
+      res.status(404).json({ error: 'Report not found' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint to fetch all community reports
+app.get('/api/community-reports', async (req, res) => {
+  try {
+    const database = client.db('database1');
+    const collection = database.collection('community_reports');
+    const reports = await collection.find({}).toArray();
+    
+    res.json(reports);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Start the server
