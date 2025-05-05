@@ -43,6 +43,27 @@ app.get('/api/victims', async (req, res) => {
   res.json(data);
 });
 
+// New API endpoint to fetch crime locations with details
+app.get('/api/crime-locations', async (req, res) => {
+  const { data, error } = await supabase
+    .from('crimes')
+    .select(`
+      crime_id,
+      crime_type,
+      description,
+      crime_locations (
+        latitude,
+        longitude
+      )
+    `);
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json(data);
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
