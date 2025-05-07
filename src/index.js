@@ -294,6 +294,74 @@ app.put('/api/criminals/:id', async (req, res) => {
   }
 });
 
+// Delete a specific criminal
+app.delete('/api/criminals/:id', async (req, res) => {
+  console.log(`DELETE request received at /api/criminals/${req.params.id}`);
+  try {
+    const { id } = req.params;
+    
+    // Delete from Supabase with retry
+    const result = await retryOperation(async () => {
+      const { data, error } = await supabase
+        .from('criminals')
+        .delete()
+        .eq('criminal_id', id)
+        .select();
+        
+      if (error) {
+        console.error('Supabase error:', error);
+        throw new Error(error.message || 'Supabase delete failed');
+      }
+      
+      return { data, count: data?.length || 0 };
+    });
+    
+    if (!result.data || result.count === 0) {
+      return res.status(404).json({ error: 'Criminal not found or already deleted' });
+    }
+    
+    console.log('Criminal deleted successfully:', result.data);
+    res.status(200).json({ message: 'Criminal deleted successfully', data: result.data });
+  } catch (err) {
+    console.error('Error deleting criminal:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Delete a specific victim
+app.delete('/api/victims/:id', async (req, res) => {
+  console.log(`DELETE request received at /api/victims/${req.params.id}`);
+  try {
+    const { id } = req.params;
+    
+    // Delete from Supabase with retry
+    const result = await retryOperation(async () => {
+      const { data, error } = await supabase
+        .from('victims')
+        .delete()
+        .eq('victim_id', id)
+        .select();
+        
+      if (error) {
+        console.error('Supabase error:', error);
+        throw new Error(error.message || 'Supabase delete failed');
+      }
+      
+      return { data, count: data?.length || 0 };
+    });
+    
+    if (!result.data || result.count === 0) {
+      return res.status(404).json({ error: 'Victim not found or already deleted' });
+    }
+    
+    console.log('Victim deleted successfully:', result.data);
+    res.status(200).json({ message: 'Victim deleted successfully', data: result.data });
+  } catch (err) {
+    console.error('Error deleting victim:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
