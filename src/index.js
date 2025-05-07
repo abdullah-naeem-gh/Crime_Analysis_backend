@@ -362,6 +362,162 @@ app.delete('/api/victims/:id', async (req, res) => {
   }
 });
 
+// Create a new crime with related entities
+app.post('/api/crimes', async (req, res) => {
+  console.log('POST request received at /api/crimes', req.body);
+  try {
+    const { crimeType, description, date, latitude, longitude, areaName, criminals, victims } = req.body;
+    
+    // Validation
+    if (!crimeType || !description || !latitude || !longitude) {
+      return res.status(400).json({ error: 'Crime type, description, latitude, and longitude are required' });
+    }
+    
+    // Ensure criminals and victims are arrays
+    const criminalIds = Array.isArray(criminals) ? criminals : [];
+    const victimIds = Array.isArray(victims) ? victims : [];
+    
+    console.log('Processing crime insertion with related data');
+
+    // Use retry operation for better reliability
+    const result = await retryOperation(async () => {
+      // First check if area exists
+      let areaId;
+      const area_name = areaName || 'Unknown Area';
+      
+      let { data: existingArea, error: findError } = await supabase
+        .from('areas')
+        .select('area_id')
+        .eq('name', area_name)
+        .limit(1);
+      
+      if (findError) {
+        console.error('Error finding area:', findError);
+        throw new Error(findError.message);
+      }
+      
+      // If area exists, use it; otherwise insert new area
+      if (existingArea && existingArea.length > 0) {
+        areaId = existingArea[0].area_id;
+        console.log('Using existing area:', areaId);
+      } else {
+        // Insert new area
+        const { data: newArea, error: insertError } = await supabase
+          .from('areas')
+          .insert({ name: area_name })
+          .select();
+          
+        if (insertError) {
+          console.error('Area insert error:', insertError);
+          throw new Error(insertError.message);
+        }
+        
+        areaId = newArea[0].area_id;
+        console.log('Created new area:', areaId);
+      }
+
+      // Insert Crime Location
+      const { data: locationData, error: locationError } = await supabase
+        .from('crime_locations')
+        .insert({ latitude, longitude, area_id: areaId })
+        .select();
+
+      if (locationError) {
+        console.error('Location insert error:', locationError);
+        throw new Error(locationError.message);
+      }
+
+      const locationId = locationData[0].location_id;
+      console.log('Location processed:', locationId);
+
+      // Rest of the function remains the same
+      // ...existing code...
+
+      const { data: crimeData, error: crimeError } = await supabase
+        .from('crimes')
+        .insert({ 
+          location_id: locationId, 
+          crime_type: crimeType, 
+          description, 
+          date: date || new Date().toISOString() 
+        })
+        .select();
+
+      if (crimeError) {
+        console.error('Crime insert error:', crimeError);
+        throw new Error(crimeError.message);
+      }
+
+      const crimeId = crimeData[0].crime_id;
+      console.log('Crime processed:', crimeId);
+
+      // Insert Criminal associations if any
+      if (criminalIds.length > 0) {
+        const crimeCriminalEntries = criminalIds.map(criminal_id => ({
+          crime_id: crimeId,
+          criminal_id
+        }));
+
+        const { error: criminalInsertError } = await supabase
+          .from('crime_criminal')
+          .insert(crimeCriminalEntries);
+
+        if (criminalInsertError) {
+          console.error('Criminal association error:', criminalInsertError);
+          throw new Error(criminalInsertError.message);
+        }
+        
+        console.log('Criminal associations processed:', criminalIds.length);
+      }
+
+      // Insert Victim associations if any
+      if (victimIds.length > 0) {
+        const crimeVictimEntries = victimIds.map(victim_id => ({
+          crime_id: crimeId,
+          victim_id
+        }));
+
+        const { error: victimInsertError } = await supabase
+          .from('crime_victim')
+          .insert(crimeVictimEntries);
+
+        if (victimInsertError) {
+          console.error('Victim association error:', victimInsertError);
+          throw new Error(victimInsertError.message);
+        }
+        
+        console.log('Victim associations processed:', victimIds.length);
+      }
+
+      // For returning, let's also fetch the area data
+      const { data: areaData } = await supabase
+        .from('areas')
+        .select('*')
+        .eq('area_id', areaId)
+        .limit(1);
+
+      return {
+        crime: crimeData[0],
+        location: locationData[0],
+        area: areaData[0] || { area_id: areaId, name: area_name },
+        criminals: criminalIds,
+        victims: victimIds
+      };
+    });
+
+    console.log('Crime created successfully with all associations');
+    res.status(201).json({ 
+      message: 'Crime inserted successfully', 
+      data: result 
+    });
+  } catch (err) {
+    console.error('Error inserting crime:', err);
+    res.status(500).json({ 
+      error: 'Internal server error while inserting crime: ' + err.message 
+    });
+  }
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
