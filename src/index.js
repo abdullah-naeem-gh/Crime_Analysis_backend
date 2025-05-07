@@ -155,8 +155,47 @@ app.post('/api/victims', async (req, res) => {
   }
 });
 
+// Update a specific victim
+app.put('/api/victims/:id', async (req, res) => {
+  console.log(`PUT request received at /api/victims/${req.params.id}`, req.body);
+  try {
+    const { id } = req.params;
+    const { name, age, address } = req.body;
+    
+    // Validation
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+    
+    console.log('Updating victim in Supabase:', { id, name, age, address });
+    
+    // Update in Supabase
+    const { data, error } = await supabase
+      .from('victims')
+      .update({ name, age, address })
+      .eq('victim_id', id)
+      .select();
+      
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+    
+    if (data.length === 0) {
+      return res.status(404).json({ error: 'Victim not found' });
+    }
+    
+    console.log('Victim updated successfully:', data);
+    res.json(data[0]);
+  } catch (err) {
+    console.error('Error updating victim:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Add new criminal to Supabase
 app.post('/api/criminals', async (req, res) => {
+  console.log('POST request received at /api/criminals', req.body);
   try {
     const { name, age, address } = req.body;
     
@@ -165,6 +204,7 @@ app.post('/api/criminals', async (req, res) => {
       return res.status(400).json({ error: 'Name is required' });
     }
     
+    console.log('Inserting criminal into Supabase:', { name, age, address });
     // Insert into Supabase
     const { data, error } = await supabase
       .from('criminals')
@@ -176,13 +216,81 @@ app.post('/api/criminals', async (req, res) => {
       .select();
       
     if (error) {
+      console.error('Supabase error:', error);
       return res.status(500).json({ error: error.message });
     }
     
+    console.log('Criminal added successfully:', data);
     res.status(201).json(data);
   } catch (err) {
     console.error('Error adding criminal:', err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Helper function for retrying Supabase operations
+async function retryOperation(operation, maxRetries = 3) {
+  let lastError = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`Attempt ${attempt} of ${maxRetries}`);
+      return await operation();
+    } catch (err) {
+      console.error(`Attempt ${attempt} failed:`, err);
+      lastError = err;
+      
+      // Wait before next retry with exponential backoff
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw lastError; // All retries failed
+}
+
+// Update a specific criminal
+app.put('/api/criminals/:id', async (req, res) => {
+  console.log(`PUT request received at /api/criminals/${req.params.id}`, req.body);
+  try {
+    const { id } = req.params;
+    const { name, age, address } = req.body;
+    
+    // Validation
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+    
+    console.log('Updating criminal in Supabase:', { id, name, age, address });
+    
+    // Update in Supabase with retry
+    const data = await retryOperation(async () => {
+      const { data, error } = await supabase
+        .from('criminals')
+        .update({ name, age, address })
+        .eq('criminal_id', id)
+        .select();
+        
+      if (error) {
+        console.error('Supabase error:', error);
+        throw new Error(error.message || 'Supabase update failed');
+      }
+      
+      return data;
+    });
+    
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'Criminal not found' });
+    }
+    
+    console.log('Criminal updated successfully:', data);
+    res.json(data[0]);
+  } catch (err) {
+    console.error('Error updating criminal:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
   }
 });
 
