@@ -124,6 +124,68 @@ app.get('/api/community-reports', async (req, res) => {
   }
 });
 
+// Add new victim to Supabase
+app.post('/api/victims', async (req, res) => {
+  try {
+    const { name, age, address } = req.body;
+    
+    // Validation
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+    
+    // Insert into Supabase
+    const { data, error } = await supabase
+      .from('victims')
+      .insert([{ 
+        name, 
+        age, 
+        address 
+      }])
+      .select();
+      
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('Error adding victim:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Add new criminal to Supabase
+app.post('/api/criminals', async (req, res) => {
+  try {
+    const { name, age, address } = req.body;
+    
+    // Validation
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+    
+    // Insert into Supabase
+    const { data, error } = await supabase
+      .from('criminals')
+      .insert([{ 
+        name, 
+        age, 
+        address 
+      }])
+      .select();
+      
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('Error adding criminal:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
