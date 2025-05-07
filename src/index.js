@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import supabase from '../utils/supabaseClient.js'; // Your Supabase client configuration
 import client, { connectToMongoDB } from '../utils/mongodbClient.js'; // MongoDB client
+import analyticsRoutes from './routes/analytics.js'; // Import analytics routes
 
 // Load environment variables
 dotenv.config();
@@ -21,6 +22,9 @@ connectToMongoDB();
 app.get('/', (req, res) => {
   res.send('Server is running...');
 });
+
+// Mount analytics routes
+app.use('/api/analytics', analyticsRoutes);
 
 // Supabase endpoints
 app.get('/api/crimes', async (req, res) => {
