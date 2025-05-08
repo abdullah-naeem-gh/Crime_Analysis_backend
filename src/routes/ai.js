@@ -2,6 +2,7 @@ import express from 'express';
 import { generateContent, generateContentFromImage } from '../../utils/geminiClient.js';
 import axios from 'axios';
 import supabase from '../../utils/supabaseClient.js';
+import redis, { getCache, setCache } from '../../utils/redisClient.js';
 
 const router = express.Router();
 
@@ -22,125 +23,222 @@ router.post('/generate-content', async (req, res) => {
   }
 });
 
-// Enhanced crime pattern prediction endpoint with REAL data
-router.post('/predict-crime-patterns', async (req, res) => {
-  try {
-    const { data } = req.body;
-    const { timeframe = '90', areaLimit = '5' } = data || {};
-    
-    console.log(`Generating crime prediction with timeframe: ${timeframe} days, analyzing top ${areaLimit} areas`);
-    
-    // Fetch real crime data
-    const realCrimeData = await fetchAnalyticsData(timeframe);
-    
-    // Count total crimes analyzed
-    const totalCrimesAnalyzed = realCrimeData?.crimesByType?.reduce((sum, item) => sum + item.value, 0) || 
-                               parseInt(timeframe) * 5; // Fallback estimate
-    
-    // Generate a prompt for the AI that includes instructions for the response format
-    const systemPrompt = {
-      role: "system",
-      content: `
-        You are an advanced crime prediction AI system specialized in analyzing crime patterns and providing 
-        actionable insights for law enforcement agencies. Analyze the provided crime data for a timeframe of 
-        ${timeframe} days and for the top ${areaLimit} areas.
-        
-        Your analysis should be returned as a structured JSON object with the exact format shown in this template:
-        
-        {
-          "metadata": {
-            "generated_at": "ISO_TIMESTAMP",
-            "timeframe": "Last ${timeframe} days",
-            "data_points": {
-              "areas_analyzed": ${areaLimit},
-              "total_crimes_analyzed": ${totalCrimesAnalyzed}
-            }
-          },
-          "predictions": {
-            "high_risk_areas": [
-              {
-                "name": "AREA_NAME",
-                "risk_score": SCORE_OUT_OF_10,
-                "predominant_crime_types": ["TYPE1", "TYPE2"],
-                "reasoning": "BRIEF_EXPLANATION"
-              }
-            ],
-            "crime_time_predictions": [
-              {
-                "time_period": "TIME_DESCRIPTION",
-                "confidence": SCORE_OUT_OF_10,
-                "crime_types": ["TYPE1", "TYPE2"]
-              }
-            ],
-            "emerging_trends": [
-              {
-                "trend": "TREND_DESCRIPTION",
-                "confidence": SCORE_OUT_OF_10,
-                "reasoning": "BRIEF_EXPLANATION"
-              }
-            ]
-          },
-          "insights": {
-            "pattern_analysis": "DETAILED_ANALYSIS_TEXT",
-            "correlations": [
-              {
-                "factor1": "FACTOR1",
-                "factor2": "FACTOR2",
-                "strength": SCORE_OUT_OF_10,
-                "explanation": "BRIEF_EXPLANATION"
-              }
-            ],
-            "recommendations": [
-              "RECOMMENDATION1",
-              "RECOMMENDATION2"
-            ]
-          }
-        }
-        
-        Make your predictions realistic and insightful using the actual crime data provided. Identify patterns, 
-        correlations and high-risk areas based on the data trends. Provide 3-5 entries for each array.
-        Do not include any explanatory text outside the JSON object. The response should be valid JSON that 
-        can be directly parsed.
-      `
-    };
-    
-    // User prompt with the real data
-    const userPrompt = {
-      role: "user",
-      content: `Analyze the following crime data from our database and provide predictions: ${JSON.stringify(realCrimeData)}`
-    };
-    
-    console.log('Sending data to Gemini AI for analysis...');
-    
-    // Call Gemini API
-    const aiResponse = await generateContent([systemPrompt, userPrompt]);
-    
-    // Parse response as JSON
-    let predictionData;
-    try {
-      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        predictionData = JSON.parse(jsonMatch[0]);
-        console.log('Successfully parsed AI response as JSON');
-      } else {
-        throw new Error("No JSON found in response");
-      }
-    } catch (parseError) {
-      console.error("Error parsing AI response as JSON:", parseError);
-      console.log("AI Response:", aiResponse);
+/**
+ * Generate crime predictions based on analytics data
+ * @param {string} timeframe - Number of days to analyze
+ * @param {string} areaLimit - Number of areas to analyze
+ * @returns {Object} Crime prediction data
+ */
+async function generatePredictions(timeframe = '90', areaLimit = '5') {
+  console.log(`Generating crime prediction with timeframe: ${timeframe} days, analyzing top ${areaLimit} areas`);
+  
+  // Fetch real crime data
+  const realCrimeData = await fetchAnalyticsData(timeframe);
+  
+  // Count total crimes analyzed
+  const totalCrimesAnalyzed = realCrimeData?.crimesByType?.reduce((sum, item) => sum + item.value, 0) || 
+                             parseInt(timeframe) * 5; // Fallback estimate
+  
+  // Generate a prompt for the AI that includes instructions for the response format
+  const systemPrompt = {
+    role: "system",
+    content: `
+      You are an advanced crime prediction AI system specialized in analyzing crime patterns and providing 
+      actionable insights for law enforcement agencies. Analyze the provided crime data for a timeframe of 
+      ${timeframe} days and for the top ${areaLimit} areas.
       
-      // Use fallback data
-      predictionData = generateFallbackPredictionData(timeframe, areaLimit, realCrimeData);
-      console.log('Using fallback prediction data');
+      Your analysis should be returned as a structured JSON object with the exact format shown in this template:
+      
+      {
+        "metadata": {
+          "generated_at": "ISO_TIMESTAMP",
+          "timeframe": "Last ${timeframe} days",
+          "data_points": {
+            "areas_analyzed": ${areaLimit},
+            "total_crimes_analyzed": ${totalCrimesAnalyzed}
+          }
+        },
+        "predictions": {
+          "high_risk_areas": [
+            {
+              "name": "AREA_NAME",
+              "risk_score": SCORE_OUT_OF_10,
+              "predominant_crime_types": ["TYPE1", "TYPE2"],
+              "reasoning": "BRIEF_EXPLANATION"
+            }
+          ],
+          "crime_time_predictions": [
+            {
+              "time_period": "TIME_DESCRIPTION",
+              "confidence": SCORE_OUT_OF_10,
+              "crime_types": ["TYPE1", "TYPE2"]
+            }
+          ],
+          "emerging_trends": [
+            {
+              "trend": "TREND_DESCRIPTION",
+              "confidence": SCORE_OUT_OF_10,
+              "reasoning": "BRIEF_EXPLANATION"
+            }
+          ]
+        },
+        "insights": {
+          "pattern_analysis": "DETAILED_ANALYSIS_TEXT",
+          "correlations": [
+            {
+              "factor1": "FACTOR1",
+              "factor2": "FACTOR2",
+              "strength": SCORE_OUT_OF_10,
+              "explanation": "BRIEF_EXPLANATION"
+            }
+          ],
+          "recommendations": [
+            "RECOMMENDATION1",
+            "RECOMMENDATION2"
+          ]
+        }
+      }
+      
+      Make your predictions realistic and insightful using the actual crime data provided. Identify patterns, 
+      correlations and high-risk areas based on the data trends. Provide 3-5 entries for each array.
+      Do not include any explanatory text outside the JSON object. The response should be valid JSON that 
+      can be directly parsed.
+    `
+  };
+  
+  // User prompt with the real data
+  const userPrompt = {
+    role: "user",
+    content: `Analyze the following crime data from our database and provide predictions: ${JSON.stringify(realCrimeData)}`
+  };
+  
+  console.log('Sending data to Gemini AI for analysis...');
+  
+  // Call Gemini API
+  const aiResponse = await generateContent([systemPrompt, userPrompt]);
+  
+  // Parse response as JSON
+  let predictionData;
+  try {
+    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      predictionData = JSON.parse(jsonMatch[0]);
+      console.log('Successfully parsed AI response as JSON');
+    } else {
+      throw new Error("No JSON found in response");
+    }
+  } catch (parseError) {
+    console.error("Error parsing AI response as JSON:", parseError);
+    console.log("AI Response:", aiResponse);
+    
+    // Use fallback data
+    predictionData = generateFallbackPredictionData(timeframe, areaLimit, realCrimeData);
+    console.log('Using fallback prediction data');
+  }
+  
+  return predictionData;
+}
+
+// GET /api/ai/cached-predictions endpoint
+router.get('/cached-predictions', async (req, res) => {
+  const { timeframe = '90', areaLimit = '5' } = req.query;
+  const cacheKey = `crime_prediction:${timeframe}:${areaLimit}`;
+  
+  try {
+    console.log(`Checking cache for key: ${cacheKey}`);
+    // Check if data exists in Redis cache
+    const cachedData = await getCache(cacheKey);
+    
+    if (cachedData) {
+      // Return cached data with cache indicator header
+      console.log(`Cache HIT for prediction data with timeframe: ${timeframe}, areaLimit: ${areaLimit}`);
+      res.setHeader('X-From-Cache', 'true');
+      return res.json(cachedData);
     }
     
-    res.json(predictionData);
+    // If not in cache, generate new predictions
+    console.log(`Cache MISS. Generating new predictions for timeframe: ${timeframe}, areaLimit: ${areaLimit}`);
+    const predictions = await generatePredictions(timeframe, areaLimit);
+    
+    // Store in Redis with expiration (24 hours)
+    console.log('Storing new predictions in cache');
+    await setCache(cacheKey, predictions, 86400);
+    
+    // Return fresh data
+    res.setHeader('X-From-Cache', 'false');
+    return res.json(predictions);
   } catch (error) {
-    console.error('Error predicting crime patterns:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to analyze crime patterns',
-      error: error.message
+    console.error('Error fetching cached predictions:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch predictions', 
+      message: error.message 
+    });
+  }
+});
+
+// Modified POST /api/ai/predict-crime-patterns endpoint
+router.post('/predict-crime-patterns', async (req, res) => {
+  try {
+    const { data = {}, updateCache = false, forceFresh = false } = req.body;
+    const { timeframe = '90', areaLimit = '5' } = data;
+    
+    // Check if we should use cache first (only if forceFresh is false)
+    if (!forceFresh) {
+      const cacheKey = `crime_prediction:${timeframe}:${areaLimit}`;
+      console.log(`Checking cache for key: ${cacheKey}`);
+      const cachedData = await getCache(cacheKey);
+      
+      if (cachedData) {
+        console.log(`Cache HIT! Using cached prediction data`);
+        res.setHeader('X-From-Cache', 'true');
+        return res.json(cachedData);
+      }
+    }
+    
+    console.log(`Generating fresh crime prediction with timeframe: ${timeframe}, analyzing top ${areaLimit} areas`);
+    
+    // Generate fresh predictions
+    const predictions = await generatePredictions(timeframe, areaLimit);
+    
+    // Store in Redis if updateCache is true or we had a cache miss
+    if (updateCache || !forceFresh) {
+      const cacheKey = `crime_prediction:${timeframe}:${areaLimit}`;
+      console.log(`Updating cache for key: ${cacheKey}`);
+      await setCache(cacheKey, predictions, 86400);
+    }
+    
+    res.setHeader('X-From-Cache', 'false');
+    return res.json(predictions);
+  } catch (error) {
+    console.error('Error generating predictions:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate predictions', 
+      message: error.message 
+    });
+  }
+});
+
+// Add a dedicated endpoint for refreshing predictions
+router.post('/refresh-predictions', async (req, res) => {
+  try {
+    const { timeframe = '90', areaLimit = '5' } = req.body;
+    
+    console.log(`Refreshing crime predictions for timeframe: ${timeframe}, areaLimit: ${areaLimit}`);
+    
+    // Always generate fresh predictions
+    const predictions = await generatePredictions(timeframe, areaLimit);
+    
+    // Update the cache with the new predictions
+    const cacheKey = `crime_prediction:${timeframe}:${areaLimit}`;
+    await setCache(cacheKey, predictions, 86400);
+    
+    res.setHeader('X-From-Cache', 'false');
+    return res.json(predictions);
+  } catch (error) {
+    console.error('Error refreshing predictions:', error);
+    res.status(500).json({ 
+      error: 'Failed to refresh predictions', 
+      message: error.message 
     });
   }
 });
