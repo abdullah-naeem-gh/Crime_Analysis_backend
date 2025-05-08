@@ -5,6 +5,8 @@ import supabase from '../utils/supabaseClient.js'; // Your Supabase client confi
 import client, { connectToMongoDB } from '../utils/mongodbClient.js'; // MongoDB client
 import analyticsRoutes from './routes/analytics.js'; // Import analytics routes
 import aiRoutes from './routes/ai.js'; // Import AI routes
+// Add the new import for safe path routes
+import safePathRoutes from './routes/safePath.js';
 
 // Load environment variables
 dotenv.config();
@@ -27,6 +29,8 @@ app.get('/', (req, res) => {
 // Mount routes
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/ai', aiRoutes);
+// Add the new route for safe path calculation
+app.use('/api', safePathRoutes);
 
 // Supabase endpoints
 app.get('/api/crimes', async (req, res) => {

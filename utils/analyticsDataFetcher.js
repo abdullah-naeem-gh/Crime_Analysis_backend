@@ -88,4 +88,34 @@ export async function fetchAllAnalyticsData(timeframe = '90') {
   }
 }
 
-export default { fetchAllAnalyticsData };
+/**
+ * Fetch crime location data specifically for pathfinding algorithm
+ * @param {string} timeframe - Number of days to look back for crime data
+ * @returns {Promise<Array>} Array of crime locations with coordinates and metadata
+ */
+export async function fetchCrimeLocationsForPathfinding(timeframe = '90') {
+  try {
+    const start = new Date();
+    start.setDate(start.getDate() - parseInt(timeframe));
+    const startDate = start.toISOString().split('T')[0];
+    const endDate = new Date().toISOString().split('T')[0];
+    const dateParams = `?start=${startDate}&end=${endDate}`;
+
+    // Fetch crime locations with coordinates and crime type information
+    const response = await axios.get(`${BASE_URL}/api/crime-locations${dateParams}`)
+      .catch(err => {
+        console.error('Error fetching crime locations:', err);
+        return { data: [] };
+      });
+    
+    return response.data || [];
+  } catch (error) {
+    console.error('Error fetching crime locations for pathfinding:', error);
+    return [];
+  }
+}
+
+export default { 
+  fetchAllAnalyticsData,
+  fetchCrimeLocationsForPathfinding
+};
