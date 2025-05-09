@@ -851,6 +851,166 @@ app.get('/api/community-reports/:id/comment-count', async (req, res) => {
   }
 });
 
+// Endpoint to create a new police station
+app.post('/api/stations', async (req, res) => {
+  console.log('POST request received at /api/stations', req.body);
+  try {
+    const { station_name, address, latitude, longitude } = req.body;
+    
+    // Validation
+    if (!station_name || !address || !latitude || !longitude) {
+      return res.status(400).json({ 
+        error: 'Station name, address, latitude, and longitude are required' 
+      });
+    }
+    
+    console.log('Processing station insertion with location data');
+
+    // Use retry operation for better reliability
+    const result = await retryOperation(async () => {
+      // Insert directly into stations table with coordinates
+      const { data: stationData, error: stationError } = await supabase
+        .from('stations')
+        .insert({ 
+          station_name, 
+          address, 
+          latitude,
+          longitude
+        })
+        .select();
+
+      if (stationError) {
+        console.error('Station insert error:', stationError);
+        throw new Error(stationError.message);
+      }
+
+      const stationId = stationData[0].station_id;
+      console.log('Station processed:', stationId);
+
+      // Return station data
+      return stationData[0];
+    });
+
+    console.log('Station created successfully');
+    res.status(201).json({ 
+      message: 'Station created successfully', 
+      data: result 
+    });
+  } catch (err) {
+    console.error('Error creating station:', err);
+    res.status(500).json({ 
+      error: 'Internal server error while creating station: ' + err.message 
+    });
+  }
+});
+
+// Endpoint to get all police stations
+app.get('/api/stations', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('stations')
+      .select('*');
+    
+    if (error) {
+      console.error('Error fetching stations:', error);
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.json(data);
+  } catch (err) {
+    console.error('Error in stations endpoint:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Endpoint to update a police station
+app.put('/api/stations/:id', async (req, res) => {
+  console.log(`PUT request received at /api/stations/${req.params.id}`, req.body);
+  try {
+    const { id } = req.params;
+    const { station_name, address, latitude, longitude } = req.body;
+    
+    // Validation
+    if (!station_name || !address) {
+      return res.status(400).json({ error: 'Station name and address are required' });
+    }
+    
+    console.log('Updating station in Supabase:', { id, station_name, address, latitude, longitude });
+    
+    // Update in Supabase with retry
+    const result = await retryOperation(async () => {
+      // Update all fields at once
+      const updateData = { 
+        station_name, 
+        address
+      };
+      
+      // Only include coordinates if they were provided
+      if (latitude !== undefined) updateData.latitude = latitude;
+      if (longitude !== undefined) updateData.longitude = longitude;
+      
+      // Update station with all provided fields
+      const { data, error } = await supabase
+        .from('stations')
+        .update(updateData)
+        .eq('station_id', id)
+        .select();
+        
+      if (error) {
+        console.error('Station update error:', error);
+        throw new Error(error.message || 'Station update failed');
+      }
+      
+      if (!data || data.length === 0) {
+        throw new Error('Station not found');
+      }
+      
+      return data[0];
+    });
+    
+    console.log('Station updated successfully:', result);
+    res.json(result);
+  } catch (err) {
+    console.error('Error updating station:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Endpoint to delete a police station
+app.delete('/api/stations/:id', async (req, res) => {
+  console.log(`DELETE request received at /api/stations/${req.params.id}`);
+  try {
+    const { id } = req.params;
+    
+    // Delete from Supabase with retry
+    const result = await retryOperation(async () => {
+      // Delete the station directly
+      const { data, error } = await supabase
+        .from('stations')
+        .delete()
+        .eq('station_id', id)
+        .select();
+        
+      if (error) {
+        console.error('Station delete error:', error);
+        throw new Error(error.message || 'Station delete failed');
+      }
+      
+      return { data, count: data?.length || 0 };
+    });
+    
+    if (!result.data || result.count === 0) {
+      return res.status(404).json({ error: 'Station not found or already deleted' });
+    }
+    
+    console.log('Station deleted successfully:', result.data);
+    res.status(200).json({ message: 'Station deleted successfully', data: result.data });
+  } catch (err) {
+    console.error('Error deleting station:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
