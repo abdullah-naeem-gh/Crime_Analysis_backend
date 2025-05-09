@@ -85,21 +85,41 @@ app.get('/api/areas', async (req, res) => {
 
 app.post('/api/community-reports', async (req, res) => {
   try {
-    const { content, location, is_anonymous, user_id } = req.body;
+    const { 
+      title, 
+      description, 
+      images = [], 
+      location, 
+      tags = [], 
+      user_id
+    } = req.body;
 
     // Validation
-    if (!content || !user_id) {
-      return res.status(400).json({ error: 'Content and User ID are required' });
+    if (!title || !description || !user_id) {
+      return res.status(400).json({ error: 'Title, description, and User ID are required' });
     }
 
-    const database = client.db('yourDatabaseName');
+    const database = client.db('database1');
     const collection = database.collection('community_reports');
-    const report = { content, location, is_anonymous, user_id, date: new Date() };
+    
+    const report = { 
+      title,
+      description,
+      timestamp: new Date(),
+      images,
+      location: location || {},
+      tags,
+      user_id,
+      likes: [] // Initialize empty likes array
+    };
     
     const result = await collection.insertOne(report);
 
-    // Directly return the inserted report
-    res.status(201).json(result);
+    // Return the inserted report with its ID
+    res.status(201).json({
+      ...result,
+      document: report
+    });
   } catch (err) {
     console.error('Error adding report:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -108,15 +128,19 @@ app.post('/api/community-reports', async (req, res) => {
 
 app.delete('/api/community-reports/:id', async (req, res) => {
   try {
+    const { ObjectId } = await import('mongodb');
     const database = client.db('database1');
     const collection = database.collection('community_reports');
-    const result = await collection.deleteOne({ _id: new MongoClient.ObjectId(req.params.id) });
+    
+    const result = await collection.deleteOne({ _id: new ObjectId(req.params.id) });
+    
     if (result.deletedCount === 1) {
       res.status(204).send(); // Successful deletion, no content
     } else {
       res.status(404).json({ error: 'Report not found' });
     }
   } catch (err) {
+    console.error('Error deleting report:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -130,6 +154,7 @@ app.get('/api/community-reports', async (req, res) => {
     
     res.json(reports);
   } catch (err) {
+    console.error('Error fetching community reports:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -525,6 +550,304 @@ app.post('/api/crimes', async (req, res) => {
     res.status(500).json({ 
       error: 'Internal server error while inserting crime: ' + err.message 
     });
+  }
+});
+
+// Endpoint to add a new comment to a community report
+app.post('/api/community-reports/:id/comments', async (req, res) => {
+  try {
+    const { ObjectId } = await import('mongodb');
+    const reportId = req.params.id;
+    const { user_id, comment } = req.body;
+
+    // Validation
+    if (!comment || !user_id) {
+      return res.status(400).json({ error: 'Comment text and user ID are required' });
+    }
+
+    // Validate report exists
+    const database = client.db('database1');
+    const reportsCollection = database.collection('community_reports');
+    
+    const reportExists = await reportsCollection.findOne({ _id: new ObjectId(reportId) });
+    if (!reportExists) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const commentsCollection = database.collection('report_comments');
+    
+    const commentDoc = {
+      report_id: new ObjectId(reportId),
+      user_id,
+      comment,
+      timestamp: new Date(),
+      parent_comment_id: null, // Root level comment
+      likes: []
+    };
+    
+    const result = await commentsCollection.insertOne(commentDoc);
+
+    // Return the created comment with its ID
+    res.status(201).json({
+      ...result,
+      document: commentDoc
+    });
+  } catch (err) {
+    console.error('Error adding comment:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+// Endpoint to retrieve all comments for a report (including threaded replies)
+app.get('/api/community-reports/:id/comments', async (req, res) => {
+  try {
+    const { ObjectId } = await import('mongodb');
+    const reportId = req.params.id;
+    const database = client.db('database1');
+    const commentsCollection = database.collection('report_comments');
+    
+    const comments = await commentsCollection
+      .find({ report_id: new ObjectId(reportId) })
+      .sort({ timestamp: 1 }) // Oldest first, can change to -1 for newest first
+      .toArray();
+    
+    res.json(comments);
+  } catch (err) {
+    console.error('Error fetching comments:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+// Endpoint to add a reply to an existing comment
+app.post('/api/community-reports/:reportId/comments/:commentId/reply', async (req, res) => {
+  try {
+    const { ObjectId } = await import('mongodb');
+    const { reportId, commentId } = req.params;
+    const { user_id, comment } = req.body;
+
+    // Validation
+    if (!comment || !user_id) {
+      return res.status(400).json({ error: 'Comment text and user ID are required' });
+    }
+
+    // Validate parent comment exists
+    const database = client.db('database1');
+    const commentsCollection = database.collection('report_comments');
+    
+    const parentComment = await commentsCollection.findOne({ _id: new ObjectId(commentId) });
+    if (!parentComment) {
+      return res.status(404).json({ error: 'Parent comment not found' });
+    }
+
+    const replyDoc = {
+      report_id: new ObjectId(reportId),
+      user_id,
+      comment,
+      timestamp: new Date(),
+      parent_comment_id: new ObjectId(commentId),
+      likes: []
+    };
+    
+    const result = await commentsCollection.insertOne(replyDoc);
+
+    // Return the created reply
+    res.status(201).json({
+      ...result,
+      document: replyDoc
+    });
+  } catch (err) {
+    console.error('Error adding reply:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+// Endpoint to like a comment
+app.put('/api/community-reports/:reportId/comments/:commentId/like', async (req, res) => {
+  try {
+    const { ObjectId } = await import('mongodb');
+    const { commentId } = req.params;
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    const database = client.db('database1');
+    const commentsCollection = database.collection('report_comments');
+    
+    // Add user_id to likes array if not already present
+    const result = await commentsCollection.updateOne(
+      { _id: new ObjectId(commentId), likes: { $ne: user_id } },
+      { $addToSet: { likes: user_id } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'Comment not found' });
+    }
+
+    // Get updated comment
+    const updatedComment = await commentsCollection.findOne({ _id: new ObjectId(commentId) });
+    res.json(updatedComment);
+  } catch (err) {
+    console.error('Error liking comment:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+// Endpoint to unlike a comment
+app.put('/api/community-reports/:reportId/comments/:commentId/unlike', async (req, res) => {
+  try {
+    const { ObjectId } = await import('mongodb');
+    const { commentId } = req.params;
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    const database = client.db('database1');
+    const commentsCollection = database.collection('report_comments');
+    
+    // Remove user_id from likes array
+    const result = await commentsCollection.updateOne(
+      { _id: new ObjectId(commentId) },
+      { $pull: { likes: user_id } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'Comment not found' });
+    }
+
+    // Get updated comment
+    const updatedComment = await commentsCollection.findOne({ _id: new ObjectId(commentId) });
+    res.json(updatedComment);
+  } catch (err) {
+    console.error('Error unliking comment:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+// Endpoint to like a community report
+app.put('/api/community-reports/:id/like', async (req, res) => {
+  try {
+    const { ObjectId } = await import('mongodb');
+    const reportId = req.params.id;
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    const database = client.db('database1');
+    const reportsCollection = database.collection('community_reports');
+    
+    // Check if report exists
+    const reportExists = await reportsCollection.findOne({ _id: new ObjectId(reportId) });
+    if (!reportExists) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    
+    // First ensure likes field exists if not already
+    if (!reportExists.likes) {
+      await reportsCollection.updateOne(
+        { _id: new ObjectId(reportId) },
+        { $set: { likes: [] } }
+      );
+    }
+    
+    // Now add user_id to likes array if not already present
+    const result = await reportsCollection.updateOne(
+      { _id: new ObjectId(reportId) },
+      { $addToSet: { likes: user_id } }
+    );
+
+    // Get updated report with like count
+    const updatedReport = await reportsCollection.findOne(
+      { _id: new ObjectId(reportId) },
+      { projection: { likes: 1, title: 1, timestamp: 1 } }
+    );
+    
+    res.json({
+      ...updatedReport,
+      likeCount: updatedReport.likes ? updatedReport.likes.length : 0
+    });
+  } catch (err) {
+    console.error('Error liking report:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+// Endpoint to unlike a community report
+app.put('/api/community-reports/:id/unlike', async (req, res) => {
+  try {
+    const { ObjectId } = await import('mongodb');
+    const reportId = req.params.id;
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    const database = client.db('database1');
+    const reportsCollection = database.collection('community_reports');
+    
+    // Check if report exists
+    const reportExists = await reportsCollection.findOne({ _id: new ObjectId(reportId) });
+    if (!reportExists) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    
+    // First ensure likes field exists if not already
+    if (!reportExists.likes) {
+      await reportsCollection.updateOne(
+        { _id: new ObjectId(reportId) },
+        { $set: { likes: [] } }
+      );
+    }
+    
+    // Remove user_id from likes array
+    const result = await reportsCollection.updateOne(
+      { _id: new ObjectId(reportId) },
+      { $pull: { likes: user_id } }
+    );
+
+    // Get updated report with like count
+    const updatedReport = await reportsCollection.findOne(
+      { _id: new ObjectId(reportId) },
+      { projection: { likes: 1, title: 1, timestamp: 1 } }
+    );
+    
+    res.json({
+      ...updatedReport,
+      likeCount: updatedReport.likes ? updatedReport.likes.length : 0
+    });
+  } catch (err) {
+    console.error('Error unliking report:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+// Endpoint to get comment count for a community report
+app.get('/api/community-reports/:id/comment-count', async (req, res) => {
+  try {
+    const { ObjectId } = await import('mongodb');
+    const reportId = req.params.id;
+    const database = client.db('database1');
+    const commentsCollection = database.collection('report_comments');
+    
+    // Count all comments associated with this report
+    const commentCount = await commentsCollection.countDocuments({ 
+      report_id: new ObjectId(reportId) 
+    });
+    
+    // Return the count in a simple JSON structure
+    res.json({ 
+      report_id: reportId,
+      comment_count: commentCount
+    });
+  } catch (err) {
+    console.error('Error fetching comment count:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
   }
 });
 
