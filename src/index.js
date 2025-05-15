@@ -619,7 +619,7 @@ app.put('/api/community-reports/:reportId/comments/:commentId/unlike', async (re
 });
 
 // Endpoint to like a community report
-app.put('/api/community-reports/:id/like', async (req, res) => {
+app.put('/community-reports/:id/like', async (req, res) => {
   try {
     const { ObjectId } = await import('mongodb');
     const reportId = req.params.id;
