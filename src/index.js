@@ -17,6 +17,12 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+// Handle duplicated /api prefix
+app.use('/api/api', (req, res, next) => {
+  // Rewrite the URL path to remove the duplicate
+  req.url = req.url.replace('/api', '');
+  next();
+});
 
 // Connect to MongoDB
 connectToMongoDB();
@@ -619,7 +625,7 @@ app.put('/api/community-reports/:reportId/comments/:commentId/unlike', async (re
 });
 
 // Endpoint to like a community report
-app.put('/community-reports/:id/like', async (req, res) => {
+app.put('/api/community-reports/:id/like', async (req, res) => {
   try {
     const { ObjectId } = await import('mongodb');
     const reportId = req.params.id;
