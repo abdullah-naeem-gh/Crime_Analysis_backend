@@ -112,7 +112,7 @@ async function generatePredictions(timeframe = '90', areaLimit = '5') {
     content: `Analyze the following crime data from our database and provide predictions: ${JSON.stringify(realCrimeData)}`
   };
   
-  console.log('Sending data to OpenAI for analysis...');
+  console.log('Sending data to Gemini AI for analysis...');
   
   // Call Gemini API
   const aiResponse = await generateContent([systemPrompt, userPrompt]);

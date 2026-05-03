@@ -1,55 +1,63 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from 'dotenv';
-import OpenAI from 'openai';
 
 dotenv.config();
 
-const API_KEY = process.env.OPENAI_API_KEY;
+const API_KEY = process.env.GEMINI_API_KEY;
 if (!API_KEY) {
-  console.error("ERROR: OpenAI API key not found in environment variables (OPENAI_API_KEY)");
+  console.error("ERROR: Gemini API key not found in environment variables");
 }
 
-function getOpenAIClient() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing OPENAI_API_KEY");
-  }
-  return new OpenAI({ apiKey });
-}
+const genAI = new GoogleGenerativeAI(API_KEY);
 
-function toChatMessages(prompt, systemInstruction) {
-  if (Array.isArray(prompt)) {
-    return prompt.map((p) => ({
-      role: p.role,
-      content: p.content,
-    }));
-  }
-
-  const messages = [];
-  if (systemInstruction) {
-    messages.push({ role: 'system', content: systemInstruction });
-  }
-  messages.push({ role: 'user', content: String(prompt) });
-  return messages;
-}
-
-export async function generateContent(prompt, systemInstruction, model) {
+export async function generateContent(prompt) {
   try {
-    const chosenModel = model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
-    const messages = toChatMessages(prompt, systemInstruction);
+    // For text-only input, use the gemini-pro model
+    const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
 
-    const openai = getOpenAIClient();
-    const result = await openai.chat.completions.create({
-      model: chosenModel,
-      messages,
-      temperature: 0.7,
-    });
+    // Generate content based on prompt type
+    let result;
 
-    const content = result?.choices?.[0]?.message?.content;
-    return typeof content === 'string' ? content : JSON.stringify(content ?? '');
+    if (Array.isArray(prompt)) {
+      // Handle structured prompts with system instructions
+      const generationConfig = {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 8192,
+      };
+
+      // Correct format for Gemini API
+      // Convert 'system' roles to 'user' roles as Gemini doesn't support system roles
+      const formattedPrompts = prompt.map(p => {
+        if (p.role === 'system') {
+          console.warn("Warning: Converting 'system' role to 'user' role for Gemini compatibility");
+          return {
+            role: 'user',
+            parts: [{ text: "System instruction: " + p.content }]
+          };
+        }
+        return {
+          role: p.role,
+          parts: [{ text: p.content }]
+        };
+      });
+
+      result = await model.generateContent({
+        contents: formattedPrompts,
+        generationConfig,
+      });
+    } else {
+      // Handle simple string prompts
+      result = await model.generateContent(prompt);
+    }
+
+    const response = await result.response;
+    return response.text();
   } catch (error) {
-    console.error("Error generating content with OpenAI:", error);
-    if (error?.status === 401) {
-      throw new Error("OpenAI authentication failed: check OPENAI_API_KEY");
+    console.error("Error generating content with Gemini:", error);
+    if (error.message && error.message.includes("insufficient authentication scopes")) {
+      throw new Error("API key permissions issue: The Gemini API key doesn't have sufficient permissions");
     }
     throw error;
   }
@@ -57,29 +65,22 @@ export async function generateContent(prompt, systemInstruction, model) {
 
 export async function generateContentFromImage(prompt, imageData, options = {}) {
   try {
-    const chosenModel = options.model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
-    const mimeType = options.mimeType || 'image/jpeg';
-    const dataUrl = `data:${mimeType};base64,${imageData}`;
+    // For multimodal input (text + images), use the gemini-pro-vision model
+    const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
 
-    const openai = getOpenAIClient();
-    const result = await openai.chat.completions.create({
-      model: chosenModel,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: String(prompt) },
-            { type: 'image_url', image_url: { url: dataUrl } },
-          ],
-        },
-      ],
-      temperature: typeof options.temperature === 'number' ? options.temperature : 0.7,
-    });
+    const imagePart = {
+      inlineData: {
+        data: imageData,
+        mimeType: "image/jpeg", // Adjust mime type as needed
+      },
+    };
 
-    const content = result?.choices?.[0]?.message?.content;
-    return typeof content === 'string' ? content : JSON.stringify(content ?? '');
+    // Generate content from text and image
+    const result = await model.generateContent([prompt, imagePart]);
+    const response = await result.response;
+    return response.text();
   } catch (error) {
-    console.error("Error generating content from image with OpenAI:", error);
+    console.error("Error generating content from image with Gemini:", error);
     throw error;
   }
 }
